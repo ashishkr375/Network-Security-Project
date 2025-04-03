@@ -32,67 +32,98 @@ DEFAULT_ZERO_FEATURES = [
 def extract_features_from_packet(packet):
     """
     Extracts KDD-like features from a single Scapy packet.
-    Returns a dictionary of features or None if not IP layer.
+    Returns a dictionary of features or None if packet cannot be processed.
     NOTE: This is an APPROXIMATION. Many KDD features require connection state.
     """
-    if not packet.haslayer(IP):
-        return None # We need IP layer for src/dst addresses
+    try:
+        if not packet or not packet.haslayer(IP):
+            print("Skipping packet: No IP layer")
+            return None
 
-    features = {col: 0 for col in KDD_COLUMNS} # Initialize with defaults
+        features = {col: 0 for col in KDD_COLUMNS}  # Initialize with defaults
+        
+        try:
+            ip_layer = packet.getlayer(IP)
+            src_ip = ip_layer.src
+            dst_ip = ip_layer.dst
+            protocol = ip_layer.proto
+        except Exception as e:
+            print(f"Error extracting IP layer info: {e}")
+            return None
 
-    ip_layer = packet.getlayer(IP)
-    src_ip = ip_layer.src
-    dst_ip = ip_layer.dst
-    protocol = ip_layer.proto
+        # Basic Features
+        try:
+            src_port = packet.sport if hasattr(packet, 'sport') else 0
+            dst_port = packet.dport if hasattr(packet, 'dport') else 0
+            features['land'] = 1 if src_ip == dst_ip and src_port == dst_port and src_port != 0 else 0
+            features['src_bytes'] = len(ip_layer.payload) if hasattr(ip_layer, 'payload') else 0
+            features['dst_bytes'] = 0  # Can't know dst_bytes from a single packet reliably
+        except Exception as e:
+            print(f"Error extracting basic features: {e}")
+            # Continue with defaults
 
-    # Basic Features
-    # Scapy packets might not have sport/dport if not TCP/UDP layer
-    src_port = packet.sport if hasattr(packet, 'sport') else 0
-    dst_port = packet.dport if hasattr(packet, 'dport') else 0
-    features['land'] = 1 if src_ip == dst_ip and src_port == dst_port and src_port != 0 else 0
-    features['src_bytes'] = len(ip_layer.payload) # Approximating with payload length
-    features['dst_bytes'] = 0 # Can't know dst_bytes from a single packet reliably
+        # Protocol Specific Features
+        try:
+            if protocol == 6 and packet.haslayer(TCP):  # TCP
+                tcp_layer = packet.getlayer(TCP)
+                features['protocol_type'] = 'tcp'
+                features['service'] = get_service(tcp_layer.dport, 'tcp')
+                features['flag'] = get_tcp_flag_str(tcp_layer.flags)
+                if hasattr(tcp_layer, 'load'): 
+                    features['src_bytes'] = len(tcp_layer.load)
+                
+            elif protocol == 17 and packet.haslayer(UDP):  # UDP
+                udp_layer = packet.getlayer(UDP)
+                features['protocol_type'] = 'udp'
+                features['service'] = get_service(udp_layer.dport, 'udp')
+                features['flag'] = 'SF'
+                if hasattr(udp_layer, 'load'): 
+                    features['src_bytes'] = len(udp_layer.load)
+                
+            elif protocol == 1 and packet.haslayer(ICMP):  # ICMP
+                icmp_layer = packet.getlayer(ICMP)
+                features['protocol_type'] = 'icmp'
+                features['service'] = get_service(icmp_layer.type, 'icmp')
+                features['flag'] = 'SF'
+                if hasattr(icmp_layer, 'load'): 
+                    features['src_bytes'] = len(icmp_layer.load)
+                
+            else:  # Other protocols
+                features['protocol_type'] = 'other'
+                features['service'] = 'other'
+                features['flag'] = 'OTH'
+                if hasattr(ip_layer, 'payload'):
+                    features['src_bytes'] = len(ip_layer.payload)
+        except Exception as e:
+            print(f"Error extracting protocol-specific features: {e}")
+            # Set defaults for protocol features
+            features['protocol_type'] = 'other'
+            features['service'] = 'other'
+            features['flag'] = 'OTH'
 
-    # Protocol Specific Features
-    if protocol == 6 and packet.haslayer(TCP): # TCP
-        tcp_layer = packet.getlayer(TCP)
-        features['protocol_type'] = 'tcp'
-        features['service'] = get_service(tcp_layer.dport, 'tcp')
-        features['flag'] = get_tcp_flag_str(tcp_layer.flags)
-        if hasattr(tcp_layer, 'load'): features['src_bytes'] = len(tcp_layer.load)
-        else: features['src_bytes'] = 0
+        # Fill remaining default features
+        for feat in DEFAULT_ZERO_FEATURES:
+            if feat not in ['src_bytes', 'dst_bytes', 'land', 'protocol_type', 'service', 'flag']:
+                features[feat] = 0
 
-    elif protocol == 17 and packet.haslayer(UDP): # UDP
-        udp_layer = packet.getlayer(UDP)
-        features['protocol_type'] = 'udp'
-        features['service'] = get_service(udp_layer.dport, 'udp')
-        features['flag'] = 'SF'
-        if hasattr(udp_layer, 'load'): features['src_bytes'] = len(udp_layer.load)
-        else: features['src_bytes'] = 0
+        # Add packet metadata
+        try:
+            features['_packet_time'] = float(packet.time)
+            features['_src_ip'] = src_ip
+            features['_dst_ip'] = dst_ip
+            features['_src_port'] = src_port
+            features['_dst_port'] = dst_port
+        except Exception as e:
+            print(f"Error adding packet metadata: {e}")
+            # Use defaults if metadata extraction fails
+            features['_packet_time'] = 0.0
+            features['_src_ip'] = src_ip if 'src_ip' in locals() else '0.0.0.0'
+            features['_dst_ip'] = dst_ip if 'dst_ip' in locals() else '0.0.0.0'
+            features['_src_port'] = src_port if 'src_port' in locals() else 0
+            features['_dst_port'] = dst_port if 'dst_port' in locals() else 0
 
-    elif protocol == 1 and packet.haslayer(ICMP): # ICMP
-        icmp_layer = packet.getlayer(ICMP)
-        features['protocol_type'] = 'icmp'
-        features['service'] = get_service(icmp_layer.type, 'icmp')
-        features['flag'] = 'SF'
-        if hasattr(icmp_layer, 'load'): features['src_bytes'] = len(icmp_layer.load)
-        else: features['src_bytes'] = 0
-    else: # Other protocols
-        features['protocol_type'] = 'other'
-        features['service'] = 'other'
-        features['flag'] = 'OTH'
-        features['src_bytes'] = len(ip_layer.payload)
+        return features
 
-    # Fill remaining default features
-    for feat in DEFAULT_ZERO_FEATURES:
-        if feat not in ['src_bytes', 'dst_bytes', 'land', 'protocol_type', 'service', 'flag']:
-             features[feat] = 0
-
-    # Add packet metadata
-    features['_packet_time'] = float(packet.time)
-    features['_src_ip'] = src_ip
-    features['_dst_ip'] = dst_ip
-    features['_src_port'] = src_port
-    features['_dst_port'] = dst_port
-
-    return features 
+    except Exception as e:
+        print(f"Critical error in packet feature extraction: {e}")
+        return None 

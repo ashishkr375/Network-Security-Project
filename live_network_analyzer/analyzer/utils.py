@@ -18,12 +18,49 @@ SERVICE_MAP = {
 }
 
 def get_tcp_flag_str(flags):
-    if flags.R: return 'REJ'
-    elif flags.S and not flags.A: return 'S0'
-    elif flags.F: return 'SH' # Simplification
-    elif flags.S and flags.A: return 'S1' # Simplification
-    elif flags.A and not flags.S and not flags.F and not flags.R: return 'SF' # Optimistic guess
-    else: return 'OTH'
+    """
+    Converts Scapy TCP flags to NSL-KDD flag strings.
+    Improved to better detect SYN packets from different types of network captures.
+    """
+    try:
+        # If flags is an object with flag attributes (like Scapy's TCP flags)
+        if hasattr(flags, 'S') and hasattr(flags, 'A'):
+            if flags.R: return 'REJ'  # Reset flag
+            elif flags.S and not flags.A: return 'S0'  # SYN without ACK (connection attempt)
+            elif flags.F: return 'SH'  # FIN flag (simplified)
+            elif flags.S and flags.A: return 'S1'  # SYN+ACK (connection response)
+            elif flags.A and not flags.S and not flags.F and not flags.R: return 'SF'  # Normal established connection
+            else: return 'OTH'  # Other flag combinations
+        
+        # If flags is an integer (raw flag value)
+        elif isinstance(flags, int):
+            S = bool(flags & 0x02)  # SYN flag is bit 1
+            A = bool(flags & 0x10)  # ACK flag is bit 4
+            R = bool(flags & 0x04)  # RST flag is bit 2
+            F = bool(flags & 0x01)  # FIN flag is bit 0
+            
+            if R: return 'REJ'
+            elif S and not A: return 'S0'
+            elif F: return 'SH'
+            elif S and A: return 'S1'
+            elif A and not S and not F and not R: return 'SF'
+            else: return 'OTH'
+            
+        # Handle string representation for flexibility
+        elif isinstance(flags, str):
+            flags = flags.upper()
+            if 'R' in flags: return 'REJ'
+            elif 'S' in flags and 'A' not in flags: return 'S0'
+            elif 'F' in flags: return 'SH'
+            elif 'S' in flags and 'A' in flags: return 'S1'
+            elif 'A' in flags and 'S' not in flags and 'F' not in flags and 'R' not in flags: return 'SF'
+            else: return 'OTH'
+            
+    except Exception as e:
+        print(f"Error in flag conversion: {e}")
+    
+    # Default fallback
+    return 'OTH'
 
 def get_service(dport, protocol_name):
     if protocol_name == 'icmp': return 'icmp'
