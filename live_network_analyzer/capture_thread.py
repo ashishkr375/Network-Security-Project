@@ -97,7 +97,7 @@ class CaptureThread(threading.Thread):
                         store=False,
                         timeout=0.5,  # Short timeout to check stop_event frequently
                         promisc=True,
-                        filter="tcp or icmp"  # This basic filter captures all TCP (including SYN) and ICMP
+                        filter="tcp or icmp or udp"  # This basic filter captures all TCP (including SYN) and ICMP
                     )
                     
                     # Check if we should continue capturing

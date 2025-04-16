@@ -5,16 +5,15 @@ import pickle
 import pandas as pd
 import numpy as np
 import os
-# *** Corrected Import: Only import from OTHER modules within analyzer ***
-from .packet_parser import KDD_COLUMNS # Import column list for consistency
+from .packet_parser import KDD_COLUMNS 
 
-# Define features needed for Apriori rule matching (must match training names)
+
 DISCRETE_FEATURES_APRIORI = [
     'protocol_type', 'service', 'flag', 'land', 'logged_in',
     'root_shell', 'su_attempted', 'is_host_login', 'is_guest_login'
 ]
 
-# Increased threshold for attack detection - helps reduce false positives
+
 DEFAULT_PREDICTION_THRESHOLD = 0.5
 
 
@@ -22,9 +21,9 @@ class TrafficPredictor:
     """ Handles loading models and making predictions on traffic data. """
     def __init__(self, model_dir="models"):
         """ Loads artifacts during initialization. """
-        # Initialize is_loaded attribute first
+       
         self.is_loaded = False
-        # --- End Initialization ---
+     
 
         self.model_path = os.path.join(model_dir, "dnn_model.h5")
         self.preprocessor_path = os.path.join(model_dir, "dnn_preprocessor.joblib")
@@ -32,24 +31,24 @@ class TrafficPredictor:
         self.model = None
         self.preprocessor = None
         self.apriori_rule_antecedents = None
-        self._load_artifacts() # Call loading method
+        self._load_artifacts()
 
     def _load_artifacts(self):
         """ Loads the trained model, preprocessor, and Apriori rule. """
         print("Loading prediction artifacts...")
-        # Keep track of loading success for each component
+        
         model_ok = False
         preprocessor_ok = False
-        rule_ok = False # Rule loading is optional for the 'is_loaded' flag
+        rule_ok = False
 
         try:
-            # Load model without compiling for faster prediction setup
+           
             self.model = tf.keras.models.load_model(self.model_path, compile=False)
             print(f"Loaded DNN model from {self.model_path}")
             model_ok = True
         except Exception as e:
             print(f"ERROR loading DNN model '{self.model_path}': {e}")
-            # Don't raise here, let initialization complete as much as possible
+            e
 
         try:
             self.preprocessor = joblib.load(self.preprocessor_path)
@@ -61,18 +60,18 @@ class TrafficPredictor:
         try:
             with open(self.rule_path, 'rb') as f:
                 self.apriori_rule_antecedents = pickle.load(f)
-            # Basic validation of the loaded rule
+            
             if not isinstance(self.apriori_rule_antecedents, (set, frozenset)):
                 print(f"WARNING: Loaded Apriori rule from '{self.rule_path}' is not a set/frozenset "
                       f"(type: {type(self.apriori_rule_antecedents)}). Filtering will be skipped.")
-                self.apriori_rule_antecedents = None # Invalidate rule
+                self.apriori_rule_antecedents = None 
             elif len(self.apriori_rule_antecedents) == 0:
                 print(f"WARNING: Loaded Apriori rule from '{self.rule_path}' is empty. Filtering will be skipped.")
-                self.apriori_rule_antecedents = None # Invalidate rule
+                self.apriori_rule_antecedents = None
             else:
                 print(f"Loaded Apriori rule from {self.rule_path}")
                 print(f"  Rule Antecedents: {self.apriori_rule_antecedents}")
-                rule_ok = True # Consider rule loaded successfully if valid type and not empty
+                rule_ok = True
         except FileNotFoundError:
              print(f"INFO: Apriori rule file not found at '{self.rule_path}'. Filtering will be skipped.")
              self.apriori_rule_antecedents = None
@@ -80,9 +79,9 @@ class TrafficPredictor:
             print(f"ERROR loading Apriori rule '{self.rule_path}': {e}. Filtering will be skipped.")
             self.apriori_rule_antecedents = None
 
-        # Set the overall loaded status based on essential components
+        
         self.is_loaded = model_ok and preprocessor_ok
-        # --- End Setting Status ---
+       
 
         if self.is_loaded:
             print("Prediction artifacts (model & preprocessor) loaded successfully.")
@@ -98,10 +97,10 @@ class TrafficPredictor:
         """
         if not self.is_loaded:
             print("Predictor not fully loaded. Skipping prediction.")
-            return None # Indicate failure or inability to predict
+            return None
 
         if features_df.empty:
-            return np.array([]) # Return empty array for empty input
+            return np.array([])
 
         # SYN Flood detection enhancement: Explicitly mark TCP SYN packets as attacks
         # This ensures TCP SYN floods are always detected by the model
@@ -117,19 +116,18 @@ class TrafficPredictor:
             missing_apriori_cols = []
             for col in DISCRETE_FEATURES_APRIORI:
                 if col in features_df.columns:
-                    # Format as 'column_name=value' strings, handle potential NaN/None
+                    
                     apriori_match_data[col] = col + '=' + features_df[col].fillna('NA').astype(str)
                 else:
                     missing_apriori_cols.append(col)
             if missing_apriori_cols:
                 print(f"Warning: Discrete features missing for Apriori: {missing_apriori_cols}")
 
-            # Convert each row into a set of 'feature=value' strings for efficient checking
+            
             if not apriori_match_data.empty:
                 apriori_sets = apriori_match_data.apply(lambda row: set(row.dropna()), axis=1).tolist()
-            else: # If no relevant columns found
-                 apriori_sets = [set() for _ in range(len(features_df))] # List of empty sets
-
+            else:
+                 apriori_sets = [set() for _ in range(len(features_df))]
         # --- Prepare data for DNN prediction (uses the full KDD feature set) ---
         try:
             # Ensure columns are in the exact order expected by the preprocessor
@@ -155,7 +153,6 @@ class TrafficPredictor:
 
         # --- Make initial DNN predictions ---
         try:
-            # Use verbose=0 to reduce console noise during live capture
             dnn_predictions_prob = self.model.predict(X_processed, verbose=0)
             dnn_predictions = (dnn_predictions_prob > threshold).astype(int).flatten()
             print(f"Model predicted {np.sum(dnn_predictions)} attacks out of {len(dnn_predictions)} packets")

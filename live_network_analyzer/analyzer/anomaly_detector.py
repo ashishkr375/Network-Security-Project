@@ -4,16 +4,15 @@ import ipaddress
 import socket
 
 # --- Configuration ---
-TIME_WINDOW = 3  # Keep at 3 seconds for detection window
-SYN_FLOOD_THRESHOLD = 5  # Lower from 20 to 5 SYNs to detect smaller attacks
-PORT_SCAN_THRESHOLD = 5  # Lower from 10 to 5 different ports
+TIME_WINDOW = 3  
+SYN_FLOOD_THRESHOLD = 5 
+PORT_SCAN_THRESHOLD = 5 
 
 # --- State Variables (In-memory - reset on restart) ---
 syn_counts = defaultdict(lambda: {'count': 0, 'timestamp': 0})
 connection_attempts = defaultdict(lambda: {'ports': set(), 'timestamp': 0})
-alerts = [] # Global list to store alerts across batches
+alerts = [] 
 
-# Track local IP addresses for better attack attribution
 LOCAL_IP_CACHE = None
 
 def get_local_ips():
@@ -24,18 +23,18 @@ def get_local_ips():
         
     local_ips = set()
     try:
-        # Get hostname and local IP
+        
         hostname = socket.gethostname()
         local_ips.add(socket.gethostbyname(hostname))
         
-        # Try to get all addresses
+        
         addresses = socket.getaddrinfo(hostname, None)
         for addr in addresses:
             local_ips.add(addr[4][0])
     except Exception as e:
         print(f"Error getting local IPs: {e}")
     
-    # Add loopback addresses
+  
     local_ips.add('127.0.0.1')
     local_ips.add('::1')
     
@@ -61,7 +60,7 @@ def _clear_old_state(current_time):
     old_syn_count = len(syn_counts)
     old_conn_count = len(connection_attempts)
     
-    # Use a longer expiration window for state tracking (twice the normal window)
+    
     extended_window = TIME_WINDOW * 2
     
     syn_counts = defaultdict(lambda: {'count': 0, 'timestamp': 0},
@@ -89,19 +88,18 @@ def check_anomalies(packet_features_df):
 
     print(f"\nProcessing batch of {len(packet_features_df)} packets for anomalies...")
 
-    # Print unique flag values for debugging
+    
     if not packet_features_df.empty and 'flag' in packet_features_df.columns:
         flag_counts = packet_features_df['flag'].value_counts().to_dict()
         print(f"TCP Flags in batch: {flag_counts}")
         
-        # Check for S0 flags specifically
+       
         if 'S0' in flag_counts:
             print(f"Found {flag_counts['S0']} SYN packets in this batch")
 
-    # Track SYN packets by destination IP to identify targets of SYN floods
+   
     dst_syn_counts = defaultdict(int)
     
-    # Get local IPs for better attack attribution
     local_ips = get_local_ips()
     
     for index, row in packet_features_df.iterrows():
@@ -116,33 +114,29 @@ def check_anomalies(packet_features_df):
             print(f"Warning: Packet at index {index} has no source IP")
             continue
             
-        # Check if this is traffic to/from our own machine
+        
         src_is_local = is_local_ip(src_ip)
         dst_is_local = is_local_ip(dst_ip)
         
-        # We want to detect:
-        # 1. External IPs attacking us (src=external, dst=local)
-        # 2. Local network devices attacking each other (src=private, dst=private, neither is local)
-        # We want to ignore:
-        # 1. Our own outbound connections (src=local, dst=external)
+        
 
         # --- SYN Flood Detection ---
         if protocol == 'tcp' and flag == 'S0':
             print(f"TCP SYN: {src_ip}->{dst_ip}:{dst_port}")
             
-            # Track count by destination IP (target of the attack)
+            
             dst_syn_counts[dst_ip] += 1
             
-            # For proper attack attribution, we need to determine the actual attacker
+            
             attacker_ip = src_ip
             victim_ip = dst_ip
             
-            # Ignore our own outbound SYN packets to prevent false positives
+           
             if src_is_local and not dst_is_local:
                 print(f"Outbound SYN from local IP {src_ip} to external {dst_ip} - ignoring")
                 continue
                 
-            # Always track all SYN packets by source
+        
             if current_time - syn_counts[attacker_ip]['timestamp'] >= TIME_WINDOW:
                 syn_counts[attacker_ip]['count'] = 0
             syn_counts[attacker_ip]['count'] += 1
@@ -150,7 +144,7 @@ def check_anomalies(packet_features_df):
             
             print(f"SYN count for {attacker_ip}: {syn_counts[attacker_ip]['count']}/{SYN_FLOOD_THRESHOLD}")
 
-            # Check for SYN flood threshold 
+            
             if syn_counts[attacker_ip]['count'] >= SYN_FLOOD_THRESHOLD:
                 alert_msg = f"⚠️ SYN Flood Attack detected from {attacker_ip} to {victim_ip} ({syn_counts[attacker_ip]['count']} SYNs in {TIME_WINDOW}s)"
                 if alert_msg not in alerts:
@@ -161,17 +155,17 @@ def check_anomalies(packet_features_df):
 
         # --- Port Scan Detection (Basic) ---
         if protocol in ['tcp', 'udp']:
-            # Skip tracking outbound connections from our machine to reduce false positives
+           
             if src_is_local and not dst_is_local:
                 continue
                 
-            # Track connections by source IP
+            
             if current_time - connection_attempts[src_ip]['timestamp'] >= TIME_WINDOW:
                 connection_attempts[src_ip]['ports'] = set()
-            connection_attempts[src_ip]['ports'].add((dst_ip, dst_port))  # Track IP:port pairs
+            connection_attempts[src_ip]['ports'].add((dst_ip, dst_port))
             connection_attempts[src_ip]['timestamp'] = current_time
             
-            # Get unique destination ports
+            
             unique_ports = set(port for _, port in connection_attempts[src_ip]['ports'])
             port_count = len(unique_ports)
             
@@ -191,8 +185,6 @@ def check_anomalies(packet_features_df):
         if protocol == 'icmp':
             print(f"ICMP: {src_ip}->{dst_ip}")
             
-            # We could implement ICMP flood detection here if needed
-            # This would be similar to SYN flood but tracking ICMP packets
             
     # Check for targeted IPs receiving many SYN packets
     for dst_ip, count in dst_syn_counts.items():

@@ -40,7 +40,7 @@ def extract_features_from_packet(packet):
             print("Skipping packet: No IP layer")
             return None
 
-        features = {col: 0 for col in KDD_COLUMNS}  # Initialize with defaults
+        features = {col: 0 for col in KDD_COLUMNS}  
         
         try:
             ip_layer = packet.getlayer(IP)
@@ -51,16 +51,15 @@ def extract_features_from_packet(packet):
             print(f"Error extracting IP layer info: {e}")
             return None
 
-        # Basic Features
         try:
             src_port = packet.sport if hasattr(packet, 'sport') else 0
             dst_port = packet.dport if hasattr(packet, 'dport') else 0
             features['land'] = 1 if src_ip == dst_ip and src_port == dst_port and src_port != 0 else 0
             features['src_bytes'] = len(ip_layer.payload) if hasattr(ip_layer, 'payload') else 0
-            features['dst_bytes'] = 0  # Can't know dst_bytes from a single packet reliably
+            features['dst_bytes'] = 0
         except Exception as e:
             print(f"Error extracting basic features: {e}")
-            # Continue with defaults
+           
 
         # Protocol Specific Features
         try:
