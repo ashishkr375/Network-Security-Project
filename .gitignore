@@ -2,3 +2,7 @@ report-pup.tex
 README.md
 model_generate.ipynb
 project-detail.md
+index.js
+package.json
+package-lock.json
+node_modules
